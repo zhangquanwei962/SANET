@@ -7,6 +7,10 @@ from os.path import basename
 from os.path import splitext
 from torchvision import transforms
 from torchvision.utils import save_image
+from zmq import device
+from dataset import denormalzation
+
+
 
 def calc_mean_std(feat, eps=1e-5):
     # eps is a small value added to the variance to avoid divide-by-zero.
@@ -154,23 +158,33 @@ class Transform(nn.Module):
 
 def test_transform():
     transform_list = []
+    # transform_list.append(transforms.Resize(256))
     transform_list.append(transforms.ToTensor())
+    transform_list.append(transforms.Normalize(mean=[0.229, 0.224, 0.225],
+                        std=[0.485, 0.456, 0.406]))
     transform = transforms.Compose(transform_list)
     return transform
+
+def denorm(tensor, device):
+    std = torch.Tensor([0.229, 0.224, 0.225]).reshape(-1, 1, 1).to(device)
+    mean = torch.Tensor([0.485, 0.456, 0.406]).reshape(-1, 1, 1).to(device)
+    res = torch.clamp(tensor * std + mean, 0, 1)
+    return res
+
 
 parser = argparse.ArgumentParser()
 
 # Basic options
-parser.add_argument('--content', type=str, default = 'input/chicago.jpg',
+parser.add_argument('--content', '-c', type=str, default = 'input/chicago.jpg',
                     help='File path to the content image')
-parser.add_argument('--style', type=str, default = 'style/style11.jpg',
+parser.add_argument('--style', type=str, default = 'style11/style11.jpg',
                     help='File path to the style image, or multiple style \
                     images separated by commas if you want to do style \
                     interpolation or spatial control')
 parser.add_argument('--steps', type=str, default = 1)
 parser.add_argument('--vgg', type=str, default = 'vgg_normalised.pth')
-parser.add_argument('--decoder', type=str, default = 'decoder_iter_500000.pth')
-parser.add_argument('--transform', type=str, default = 'transformer_iter_500000.pth')
+parser.add_argument('--decoder', type=str, default = 'decoder_iter_69000.pth')
+parser.add_argument('--transform', type=str, default = 'transformer_iter_69000.pth')
 
 # Additional options
 parser.add_argument('--save_ext', default = '.jpg',
@@ -180,7 +194,7 @@ parser.add_argument('--output', type=str, default = 'output',
 
 # Advanced options
 
-args = parser.parse_args('')
+args = parser.parse_args()
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -218,7 +232,7 @@ decoder.to(device)
 content_tf = test_transform()
 style_tf = test_transform()
 
-content = content_tf(Image.open(args.content))
+content = content_tf(Image.open(args.content).convert('RGB'))
 style = style_tf(Image.open(args.style))
 
 style = style.to(device).unsqueeze(0)
@@ -237,8 +251,10 @@ with torch.no_grad():
         Style5_1 = enc_5(Style4_1)
     
         content = decoder(transform(Content4_1, Style4_1, Content5_1, Style5_1))
-
-        content.clamp(0, 255)
+        # content.clamp_(0, 255)
+        content = denormalzation(content, device)
+        # print(content)
+        
 
     content = content.cpu()
     
